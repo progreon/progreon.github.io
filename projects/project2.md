@@ -1,6 +1,5 @@
 ---
-layout: post
-title: Project
+title: Project Two
 ---
 
 # Project 2
