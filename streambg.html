@@ -1,0 +1,340 @@
+<html>
+	<body style="margin: 0px">
+		<canvas id="canvas" width="1920" height="1080"></canvas>
+	</body>
+	<script>
+		let url = new URL(location.href);
+		let params = {};
+		url.searchParams.forEach((v, k) => params[k] = v);
+
+		// data structures
+		// cube = { x, y, color, img, alphaAnim=undefined, satAnim=undefined }
+		// animSpeed = alpha per tick/frame
+		// alphaAnim: { value=1, speed=0, bounce=false, minValue = 0, maxValue = 1 }
+		// satAnim: { value=1, speed=0, bounce=false }
+
+		// constants
+		const COLORS = [ "#ffffff", "#fff118", "#65df4c", "#294aed", "#ffa00a", "#aa1b00" ];
+		const UNIQUE_NEIGHBOURS = params.u ? params.u === "true" : true;
+		const BACKGROUND_COLOR = params.bg || "666666";
+		const WIDTH = 1920;
+		const HEIGHT = 1080;
+		const CUBE_SIZE = isNaN(+params.size) ? 100 : +params.size;
+		const CUBE_RADIUS = isNaN(+params.c) ? CUBE_SIZE / 4 : +params.c;
+		const CUBE_PADDING = isNaN(+params.p) ? 3 : +params.p;
+		const SATURATION = isNaN(+params.s) ? .5 : +params.s;
+		const ALPHA = isNaN(+params.a) ? .5 : +params.a;
+		const ROWS = isNaN(+params.r) ? Math.round(HEIGHT / CUBE_SIZE) : +params.r;
+		const MAX_COLS = Math.ceil((WIDTH + HEIGHT) / Math.sqrt(2) / CUBE_SIZE);
+		const X0 = -MAX_COLS * CUBE_SIZE / 2;
+		const Y0 = -ROWS * CUBE_SIZE / 2;
+		const ANIMATION_TYPE = +params.anim || 0;
+
+		// variables
+		let ctxSaturation = 1;
+		let cubes = [];
+
+		// canvas setup
+		let c = document.getElementById("canvas");
+		let ctx = c.getContext("2d");
+		if (BACKGROUND_COLOR.length <= 2 && !isNaN(+BACKGROUND_COLOR) && +BACKGROUND_COLOR < COLORS.length) {
+			c.style.filter = "saturate(" + SATURATION + ")";
+			c.style.backgroundColor = COLORS[+BACKGROUND_COLOR];
+		} else {
+			ctxSaturation = SATURATION;
+			c.style.backgroundColor = BACKGROUND_COLOR;
+		}
+		ctx.translate(WIDTH / 2, HEIGHT / 2);
+		ctx.rotate(-45 * Math.PI / 180);
+
+		// functions
+		function initCube(x, y, color) {
+			let s = CUBE_SIZE;
+			let r = CUBE_RADIUS;
+			let p = CUBE_PADDING;
+			let img = document.createElement("canvas");
+			img.width = s;
+			img.height = s;
+			img.ctx = img.getContext("2d");
+			img.ctx.fillStyle = color;
+			img.ctx.strokeStyle = color;
+			img.ctx.lineJoin = "round";
+			img.ctx.lineWidth = r;
+			img.ctx.beginPath();
+			img.ctx.moveTo(p + (r / 2), p + (r / 2));
+			img.ctx.lineTo(s - p - (r / 2), p + (r / 2));
+			img.ctx.lineTo(s - p - (r / 2), s - p - (r / 2));
+			img.ctx.lineTo(p + (r / 2), s - p - (r / 2));
+			img.ctx.closePath();
+			img.ctx.stroke();
+			img.ctx.fill();
+			return { x, y, color, img };
+		}
+
+		function getSinValue(value=1, min=0, max=1) {
+			let mappedValue = ((value - min) / (max - min)) * Math.PI - Math.PI / 2;
+			let sin = Math.sin(mappedValue);
+			let sinValue = (sin + 1) / 2 * (max - min) + min;
+			return sinValue;
+		}
+
+		function drawCubeOnCanvas(ctx, cube) {
+			let scale = cube.scaleAnim ? cube.scaleAnim.value : 1;
+			let alpha = cube.alphaAnim ? cube.alphaAnim.value : 1;
+
+			// ctx.globalAlpha = ALPHA * alpha;
+			ctx.globalAlpha = ALPHA * getSinValue(alpha, cube.alphaAnim && cube.alphaAnim.minValue, cube.alphaAnim && cube.alphaAnim.maxValue);
+			ctx.filter = "saturate(" + (ctxSaturation * (cube.satAnim ? cube.satAnim.value : 1)) + ")";
+			// let size = CUBE_SIZE * scale;
+			let size = CUBE_SIZE * getSinValue(scale, cube.scaleAnim && cube.scaleAnim.minValue, cube.scaleAnim && cube.scaleAnim.maxValue);
+			ctx.drawImage(cube.img, cube.x * CUBE_SIZE + (CUBE_SIZE / 2 - size / 2), cube.y * CUBE_SIZE + (CUBE_SIZE / 2 - size / 2), size, size);
+
+			ctx.filter = "saturate(" + ctxSaturation + ")";
+			ctx.globalAlpha = ALPHA;
+		}
+
+		function getRandomInt(max) {
+			return Math.floor(Math.random() * Math.floor(max));
+		}
+
+		function isVisibleCube(cube) {
+			let s = CUBE_SIZE;
+			let x = X0 + cube.x * s;
+			let y = Y0 + cube.y * s;
+			let xs, ys;
+			let f = Math.sqrt(2) / 2;
+			// corner 1
+			xs = f * (y + x);
+			ys = f * (y - x);
+			if (-WIDTH / 2 <= xs && xs <= WIDTH / 2 && -HEIGHT / 2 <= ys && ys <= HEIGHT / 2) {
+				return true;
+			}
+			// corner 2
+			xs = f * (y + x + s);
+			ys = f * (y - x - s);
+			if (-WIDTH / 2 <= xs && xs <= WIDTH / 2 && -HEIGHT / 2 <= ys && ys <= HEIGHT / 2) {
+				return true;
+			}
+			// corner 2
+			xs = f * (y + x + s);
+			ys = f * (y - x - s);
+			if (-WIDTH / 2 <= xs && xs <= WIDTH / 2 && -HEIGHT / 2 <= ys && ys <= HEIGHT / 2) {
+				return true;
+			}
+			// corner 3
+			xs = f * (y + s + x + s);
+			ys = f * (y + s - x - s);
+			if (-WIDTH / 2 <= xs && xs <= WIDTH / 2 && -HEIGHT / 2 <= ys && ys <= HEIGHT / 2) {
+				return true;
+			}
+			// corner 4
+			xs = f * (y + s + x);
+			ys = f * (y + s - x);
+			if (-WIDTH / 2 <= xs && xs <= WIDTH / 2 && -HEIGHT / 2 <= ys && ys <= HEIGHT / 2) {
+				return true;
+			}
+			return false;
+		}
+
+		//// animation functions
+		function doAnimationTick(realTicks) {
+			cubes.forEach(cube => {
+				if (cube.alphaAnim) {
+					let anim = cube.alphaAnim;
+					let realSpeed = anim.speed * realTicks;
+					let min = anim.minValue || 0;
+					let max = anim.maxValue || 1;
+					if (anim.speed < 0) {
+						anim.value = Math.max(anim.value + realSpeed, min);
+						if (anim.value == min) {
+							if (anim.bounce) {
+								anim.speed = -anim.speed;
+							} else {
+								anim.speed = 0;
+							}
+						}
+					} else if (anim.speed > 0) {
+						anim.value = Math.min(anim.value + realSpeed, max);
+						if (anim.value == max) {
+							if (anim.bounce) {
+								anim.speed = -anim.speed;
+							} else {
+								anim.speed = 0;
+							}
+						}
+					}
+				}
+				if (cube.satAnim) {
+					let anim = cube.satAnim;
+					let realSpeed = anim.speed * realTicks;
+					let min = anim.minValue || 0;
+					let max = anim.maxValue || 1;
+					if (anim.speed < 0) {
+						anim.value = Math.max(anim.value + realSpeed, min);
+						if (anim.value == min) {
+							if (anim.bounce) {
+								anim.speed = -anim.speed;
+							} else {
+								anim.speed = 0;
+							}
+						}
+					} else if (anim.speed > 0) {
+						anim.value = Math.min(anim.value + realSpeed, max);
+						if (anim.value == max) {
+							if (anim.bounce) {
+								anim.speed = -anim.speed;
+							} else {
+								anim.speed = 0;
+							}
+						}
+					}
+				}
+				if (cube.scaleAnim) {
+					let anim = cube.scaleAnim;
+					let realSpeed = anim.speed * realTicks;
+					let min = anim.minValue || 0;
+					let max = anim.maxValue || 1;
+					if (anim.speed < 0) {
+						anim.value = Math.max(anim.value + realSpeed, min);
+						if (anim.value == min) {
+							if (anim.bounce) {
+								anim.speed = -anim.speed;
+							} else {
+								anim.speed = 0;
+							}
+						}
+					} else if (anim.speed > 0) {
+						anim.value = Math.min(anim.value + realSpeed, max);
+						if (anim.value == max) {
+							if (anim.bounce) {
+								anim.speed = -anim.speed;
+							} else {
+								anim.speed = 0;
+							}
+						}
+					}
+				}
+			});
+		}
+
+		function draw() {
+			let img = document.createElement("canvas");
+			img.width = MAX_COLS * CUBE_SIZE;
+			img.height = ROWS * CUBE_SIZE;
+			img.ctx = img.getContext("2d");
+			img.ctx.fillStyle = c.style.backgroundColor;
+			img.ctx.fillRect(0, 0, img.width, img.height);
+
+			cubes.forEach(cube => drawCubeOnCanvas(img.ctx, cube));
+			ctx.drawImage(img, X0, Y0);
+		}
+
+		let framerate = 60;
+		let prevTimestamp;
+		let ticks;
+		async function loop(timestamp) {
+			let progress = timestamp - prevTimestamp;
+			ticks += progress * framerate / 1000;
+			if (ticks >= 1) {
+				doAnimationTick(ticks);
+				draw();
+				ticks = 0;
+			}
+			prevTimestamp = timestamp;
+			await new Promise(r => setTimeout(r, 15));
+			window.requestAnimationFrame(loop);
+		}
+
+		function start() {
+			prevTimestamp = 0;
+			ticks = 0;
+			window.requestAnimationFrame(loop);
+		}
+
+		// init colors
+		let colors = [];
+		let x, y;
+		for (y = 0; y < ROWS; y++) {
+			for (x = 0; x < MAX_COLS; x++) {
+				let neighbours = [];
+				if (x > 0) neighbours.push(colors[y * MAX_COLS + (x - 1)]);
+				if (y > 0) neighbours.push(colors[(y - 1) * MAX_COLS + x]);
+				let color = getRandomInt(COLORS.length);
+				while (UNIQUE_NEIGHBOURS && neighbours.indexOf(color) >= 0) {
+					color = getRandomInt(COLORS.length);
+				}
+				colors.push(color);
+			}
+		}
+		// init cubes
+		for (y = 0; y < ROWS; y++) {
+			for (x = 0; x < MAX_COLS; x++) {
+				if (isVisibleCube({x, y})) {
+					let cube = initCube(x, y, COLORS[colors[y * MAX_COLS + x]]);
+					cubes.push(cube);
+				}
+			}
+		}
+
+		// do animation or just draw
+		switch (ANIMATION_TYPE) {
+			case 1:
+				cubes.forEach(cube => {
+					cube.alphaAnim = {
+						value: Math.random(),
+						speed: (getRandomInt(2) - .5) * 2 / (framerate * (Math.random() * 10 + 3)),
+						bounce: true,
+						minValue: 0
+					};
+				});
+				start();
+				break;
+			case 2:
+				cubes.forEach(cube => {
+					cube.satAnim = {
+						value: Math.random(),
+						speed: (getRandomInt(2) - .5) * 2 / (framerate * (Math.random() * 10 + 3)),
+						bounce: true,
+						minValue: 0
+					};
+				});
+				start();
+				break;
+			case 3:
+				cubes.forEach(cube => {
+					cube.scaleAnim = {
+						value: Math.random(),
+						speed: (getRandomInt(2) - .5) * 2 / (framerate * (Math.random() * 10 + 3)),
+						bounce: true,
+						minValue: 0
+					};
+				});
+				start();
+				break;
+			case 4:
+				cubes.forEach(cube => {
+					let value = Math.random();
+					let speed = (getRandomInt(2) - .5) * 2 / (framerate * (Math.random() * 10 + 3));
+					let minValue = .25;
+					cube.alphaAnim = {
+						value: value,
+						speed: speed,
+						bounce: true,
+						minValue
+					};
+					cube.scaleAnim = {
+						value: value,
+						speed: speed,
+						bounce: true,
+						minValue
+					};
+				});
+				start();
+				break;
+			case 0:
+			default:
+				draw();
+				break;
+		}
+	</script>
+</html>
